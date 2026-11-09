@@ -1,13 +1,15 @@
-# usage-overlay — Linux (GNOME)
+# usage-overlay: Linux (GNOME)
 
 A GNOME Shell extension port of [usage-overlay](../README.md). It shows how much
 of your AI coding-agent quota you have used directly in the **top panel**: a
-small retro pixel-art glyph plus a percentage per provider, always visible —
+small retro pixel-art glyph plus a percentage per provider, always visible. It's
 the same idea as a CPU/RAM panel indicator, one glyph per tool instead of one
 per resource.
 
-Click the indicator for the full breakdown (every row, bars, reset countdowns)
-and the actions below.
+![usage-overlay in the GNOME top panel](../docs/overlay_fedora.png)
+
+Click the indicator for Claude's raw token counts (today and this week) and the
+actions below.
 
 ## The top-bar menu
 
@@ -37,7 +39,7 @@ antenna'd robot head for `DEVIN`. See
 ## Requirements
 
 - GNOME Shell 45–48 (developed on 48).
-- `node` on `PATH` (22.5 or newer, for `node:sqlite`) — needed only for
+- `node` on `PATH` (22.5 or newer, for `node:sqlite`): needed only for
   `CURSOR`, `OPENCD` and `DEVIN`, which read local SQLite databases via
   [sqlite-usage.js](usage-overlay@iamludok.github.io/sqlite-usage.js). Everything
   else, `TOKENS` included, runs inside the extension with no extra tools.
