@@ -1,0 +1,37 @@
+/* The always-visible row in the top panel: one retro glyph + percentage
+   per enabled provider. */
+.usage-panel-box {
+  spacing: 10px;
+  padding: 0 4px;
+}
+
+.usage-panel-item {
+  spacing: 4px;
+}
+
+.usage-panel-icon {
+  padding: 0;
+}
+
+.usage-panel-pct {
+  font-family: monospace;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+/* Reference/legend text shown inside the panel-menu popup. */
+.usage-legend-label {
+  font-family: monospace;
+  font-size: 12px;
+  color: #c9d1d9;
+  padding: 4px 12px;
+  max-width: 460px;
+}
+
+/* The per-provider bars redrawn inside the panel-menu popup. */
+.usage-menu-label {
+  font-family: monospace;
+  font-size: 13px;
+  color: #e6edf3;
+  padding: 2px 12px;
+}
