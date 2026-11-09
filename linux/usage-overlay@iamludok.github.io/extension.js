@@ -8,6 +8,7 @@
 
 import GObject from 'gi://GObject';
 import GLib from 'gi://GLib';
+import Gio from 'gi://Gio';
 import Clutter from 'gi://Clutter';
 import St from 'gi://St';
 import Soup from 'gi://Soup';
@@ -30,6 +31,7 @@ const DEFAULTS = {
 };
 
 const decoder = new TextDecoder();
+const encoder = new TextEncoder();
 const GLYPH_SIZE = 16;
 
 // Top-bar button: one retro glyph + percentage per enabled provider, always
@@ -102,15 +104,22 @@ export default class UsageOverlayExtension extends Extension {
         this._lastGood = {};
 
         this._cfg = this._loadConfig();
+        // The cache is written asynchronously (_writeCache), which needs its
+        // directory to exist already.
+        GLib.mkdir_with_parents(GLib.path_get_dirname(this._configPath('usage-cache.json')), 0o755);
         this._session = new Soup.Session();
         this._session.timeout = 8;
         this._session.user_agent = 'usage-overlay/1';
+        // Cancelled in _stop(), so file reads and helper processes still in
+        // flight don't outlive the extension.
+        this._cancellable = new Gio.Cancellable();
         this._ctx = {
             home: GLib.get_home_dir(),
             extDir: this.path,
             nodeExe: GLib.find_program_in_path('node'),
             config: this._cfg,
             session: this._session,
+            cancellable: this._cancellable,
         };
         this._enabled = resolveEnabled(this._ctx);
 
@@ -127,6 +136,7 @@ export default class UsageOverlayExtension extends Extension {
     _stop() {
         this._destroyed = true;
         if (this._refreshId) { GLib.Source.remove(this._refreshId); this._refreshId = 0; }
+        if (this._cancellable) { this._cancellable.cancel(); this._cancellable = null; }
         if (this._session) { this._session.abort(); this._session = null; }
         if (this._indicator) { this._indicator.destroy(); this._indicator = null; }
         this._menuLabel = null;
@@ -283,11 +293,36 @@ export default class UsageOverlayExtension extends Extension {
         } catch (_e) { /* ignore a corrupt cache */ }
     }
 
+    // Called on every redraw, but only touches the disk when the data actually
+    // changed, and never blocks the shell: the write is async, and at most one
+    // runs at a time (a newer snapshot waits its turn, replacing any older one
+    // still waiting).
     _saveCache() {
-        const path = this._configPath('usage-cache.json');
-        try {
-            GLib.mkdir_with_parents(GLib.path_get_dirname(path), 0o755);
-            GLib.file_set_contents(path, JSON.stringify(this._lastGood));
-        } catch (_e) { /* ignore write failures */ }
+        const json = JSON.stringify(this._lastGood);
+        if (json === this._savedJson) return;
+        this._savedJson = json;
+        this._writeCache(json);
+    }
+
+    _writeCache(json) {
+        if (this._writing) {
+            this._queuedJson = json;
+            return;
+        }
+        this._writing = true;
+        const file = Gio.File.new_for_path(this._configPath('usage-cache.json'));
+        const bytes = new GLib.Bytes(encoder.encode(json));
+        file.replace_contents_bytes_async(bytes, null, false,
+            Gio.FileCreateFlags.REPLACE_DESTINATION, null, (f, res) => {
+                try {
+                    f.replace_contents_finish(res);
+                } catch (_e) {
+                    this._savedJson = null;   // write failed: retry on the next change
+                }
+                this._writing = false;
+                const next = this._queuedJson;
+                this._queuedJson = null;
+                if (next) this._writeCache(next);
+            });
     }
 }

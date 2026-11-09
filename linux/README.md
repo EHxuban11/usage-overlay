@@ -37,10 +37,10 @@ antenna'd robot head for `DEVIN`. See
 ## Requirements
 
 - GNOME Shell 45–48 (developed on 48).
-- `node` on `PATH` — needed only for `CURSOR`, `OPENCD` and `DEVIN` (local
-  SQLite via [sqlite-usage.js](usage-overlay@iamludok.github.io/sqlite-usage.js)) and
-  `TOKENS` (local transcripts via
-  [claude-tokens.js](usage-overlay@iamludok.github.io/claude-tokens.js)).
+- `node` on `PATH` (22.5 or newer, for `node:sqlite`) — needed only for
+  `CURSOR`, `OPENCD` and `DEVIN`, which read local SQLite databases via
+  [sqlite-usage.js](usage-overlay@iamludok.github.io/sqlite-usage.js). Everything
+  else, `TOKENS` included, runs inside the extension with no extra tools.
 
 ## Install
 

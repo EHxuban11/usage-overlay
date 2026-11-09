@@ -5,13 +5,15 @@
 // { label, pct, resets } with resets as an ISO string (or null) so results
 // serialize straight to the on-disk cache.
 //
-// ctx = { home, extDir, nodeExe, config, session }  (built in extension.js)
+// ctx = { home, extDir, nodeExe, config, session, cancellable }  (built in
+// extension.js; fetchers may also stash per-run state on it, e.g. tokenCounter)
 
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 import Soup from 'gi://Soup';
 
 import { httpErrLabel } from './render.js';
+import { ClaudeTokenCounter } from './tokens.js';
 
 Gio._promisify(Soup.Session.prototype, 'send_and_read_async');
 Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async');
@@ -51,12 +53,13 @@ async function httpGetJson(ctx, url, headers) {
     return { status, text: decode(bytes) };
 }
 
-async function runNode(ctx, mode, file = 'sqlite-usage.js') {
-    const args = [ctx.nodeExe, GLib.build_filenamev([ctx.extDir, file])];
-    if (mode) args.push(mode);
+// The SQLite-backed providers (Cursor, Devin, OpenCode) go through Node's
+// built-in node:sqlite, since GJS has no SQLite binding of its own.
+async function runNode(ctx, mode) {
+    const args = [ctx.nodeExe, GLib.build_filenamev([ctx.extDir, 'sqlite-usage.js']), mode];
     const proc = Gio.Subprocess.new(
         args, Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE);
-    const [stdout] = await proc.communicate_utf8_async(null, null);
+    const [stdout] = await proc.communicate_utf8_async(null, ctx.cancellable);
     return stdout;
 }
 
@@ -129,9 +132,11 @@ function formatTokens(n) {
 // say how many actual tokens that was.
 async function fetchClaudeTokens(ctx) {
     try {
-        if (!ctx.nodeExe) return { ok: false, err: 'node missing' };
-        const j = parseJsonLine(await runNode(ctx, null, 'claude-tokens.js'));
-        if (!j || j.error) return { ok: false, err: 'read failed' };
+        // Lives on ctx so it survives between ticks and only reads what the
+        // transcripts gained since the last count (see tokens.js).
+        ctx.tokenCounter ??= new ClaudeTokenCounter(
+            GLib.build_filenamev([ctx.home, '.claude', 'projects']));
+        const j = await ctx.tokenCounter.count(ctx.cancellable);
         return { ok: true, textRows: [
             `today ${formatTokens(Number(j.today))} tok`,
             `wk ${formatTokens(Number(j.week))} tok`,
@@ -295,7 +300,7 @@ export const PROVIDERS = [
     { key: 'claude', name: 'CLAUDE', remote: true, fetch: fetchClaude,
         detect: ctx => exists(GLib.build_filenamev([ctx.home, '.claude', '.credentials.json'])) },
     { key: 'claudeTokens', name: 'TOKENS', remote: false, fetch: fetchClaudeTokens,
-        detect: ctx => !!ctx.nodeExe && exists(GLib.build_filenamev([ctx.home, '.claude', 'projects'])) },
+        detect: ctx => exists(GLib.build_filenamev([ctx.home, '.claude', 'projects'])) },
     { key: 'codex', name: 'CODEX ', remote: false, fetch: fetchCodex,
         // Only show Codex once a recent rollout actually logged quota windows:
         // an empty sessions dir, or one with only quota-less sessions, would

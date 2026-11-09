@@ -10,7 +10,7 @@ SRC="$HERE/$UUID"
 DEST="$HOME/.local/share/gnome-shell/extensions/$UUID"
 CFG_DIR="$HOME/.config/usage-overlay"
 
-command -v node >/dev/null 2>&1 || echo "warning: 'node' not found on PATH; the CURSOR and OPENCD sections need it."
+command -v node >/dev/null 2>&1 || echo "warning: 'node' not found on PATH; the CURSOR, OPENCD and DEVIN sections need it."
 
 # Install the extension (copy by default, symlink with --link).
 rm -rf "$DEST"
