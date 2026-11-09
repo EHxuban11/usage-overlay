@@ -6,9 +6,12 @@ from 60%, red from 85%, with a countdown to each window reset. On fetch
 failures it keeps the last good numbers (shown amber) and retries. Click the
 `?` button for a built-in legend.
 
-> **Linux (GNOME)?** A GNOME Shell port lives in [`linux/`](linux/README.md) —
-> same overlay plus a top-bar indicator, packaged as a Shell extension (the only
-> way to get an always-on-top, click-through surface on Wayland).
+> **Linux (GNOME)?** A GNOME Shell extension port lives in [`linux/`](linux/README.md).
+> Instead of a floating window it lives in the top panel: one pixel glyph and
+> percentage per tool. It also adds Devin/Windsurf, Ollama Cloud and Claude
+> token counts.
+>
+> ![usage-overlay in the GNOME top panel](docs/overlay_fedora.png)
 
 ![usage overlay](docs/overlay.png)
 
