@@ -11,6 +11,9 @@ node_modules/
 .env.*
 *.local
 
+# packed GNOME extension (build output of `gnome-extensions pack`)
+*.shell-extension.zip
+
 # provider credential/session data that should never be copied into the repo
 .credentials.json
 state.vscdb

@@ -1,0 +1,8 @@
+{
+  "uuid": "usage-overlay@iamludok.github.io",
+  "name": "Usage Overlay",
+  "description": "Top-bar indicator with a retro pixel glyph and percentage per tool, showing coding-agent quota usage across Claude, Codex, Cursor, Copilot and OpenCode. Linux/GNOME port of usage-overlay.",
+  "shell-version": ["45", "46", "47", "48"],
+  "url": "https://github.com/iamLudok/usage-overlay",
+  "version": 1
+}
