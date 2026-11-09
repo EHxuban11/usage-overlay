@@ -7,12 +7,18 @@ const { DatabaseSync } = require('node:sqlite');
 
 const mode = process.argv[2];
 
+// Cursor's state DB lives under %APPDATA% on Windows and ~/.config on Linux,
+// so the one helper works on both platforms.
+const cursorDbPath = process.platform === 'win32'
+  ? process.env.APPDATA + '\\Cursor\\User\\globalStorage\\state.vscdb'
+  : path.join(os.homedir(), '.config/Cursor/User/globalStorage/state.vscdb');
+
 if (mode === 'cursor') {
   // Read Cursor's session token from its local state.vscdb and print the plan
   // usage summary. Cursor stores no quota locally, so we still hit its API,
   // but the SQLite read is what makes this a Node helper.
   try {
-    const db = new DatabaseSync(process.env.APPDATA + '\\Cursor\\User\\globalStorage\\state.vscdb', { readOnly: true });
+    const db = new DatabaseSync(cursorDbPath, { readOnly: true });
     const token = db.prepare("SELECT value FROM ItemTable WHERE key='cursorAuth/accessToken'").get().value;
     const sub = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString()).sub;
     const userId = sub.includes('|') ? sub.split('|').pop() : sub;
