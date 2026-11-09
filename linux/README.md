@@ -59,6 +59,24 @@ gnome-extensions enable usage-overlay@iamludok.github.io
 
 Manage it later with `gnome-extensions disable/enable usage-overlay@iamludok.github.io`.
 
+### Packing for extensions.gnome.org
+
+`gnome-extensions pack` only picks up `extension.js`, `metadata.json` and
+`stylesheet.css` by itself, so list every other file:
+
+```bash
+cd linux/usage-overlay@iamludok.github.io
+gnome-extensions pack . --force -o ~/Downloads \
+  --extra-source=providers.js --extra-source=render.js \
+  --extra-source=icons.js --extra-source=tokens.js \
+  --extra-source=sqlite-usage.js --extra-source=config.example.json \
+  --extra-source=LICENSE
+```
+
+Don't `gnome-extensions install --force` that zip over an `./install.sh --link`
+install: it empties the symlink's target, i.e. this source folder. Run
+`gnome-extensions uninstall usage-overlay@iamludok.github.io` first.
+
 ## Sources
 
 | Section | Tool | Where the data comes from |
