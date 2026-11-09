@@ -14,6 +14,7 @@ import Soup from 'gi://Soup';
 
 import { httpErrLabel } from './render.js';
 import { ClaudeTokenCounter } from './tokens.js';
+import { exists, listFiles, readText, readTextOrNull, isCancelled } from './files.js';
 
 Gio._promisify(Soup.Session.prototype, 'send_and_read_async');
 Gio._promisify(Gio.Subprocess.prototype, 'communicate_utf8_async');
@@ -24,8 +25,9 @@ function decode(bytes) {
     return decoder.decode(bytes instanceof Uint8Array ? bytes : bytes.get_data());
 }
 
-function exists(path) {
-    return GLib.file_test(path, GLib.FileTest.EXISTS);
+// Whether the file under $HOME given by parts exists (async, see files.js).
+function homeHas(ctx, ...parts) {
+    return exists(GLib.build_filenamev([ctx.home, ...parts]), ctx.cancellable);
 }
 
 function epochToIso(sec) {
@@ -64,41 +66,20 @@ async function runNode(ctx, mode) {
 }
 
 // Newest-first list of Codex rollout logs, walking the year/month/day tree.
-function listCodexRollouts(dir) {
-    const results = [];
-    const stack = [Gio.File.new_for_path(dir)];
-    const attrs = 'standard::name,standard::type,time::modified';
-    while (stack.length) {
-        const d = stack.pop();
-        let en;
-        try {
-            en = d.enumerate_children(attrs, Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null);
-        } catch (_e) { continue; }
-        let info;
-        while ((info = en.next_file(null)) !== null) {
-            const name = info.get_name();
-            const child = d.get_child(name);
-            if (info.get_file_type() === Gio.FileType.DIRECTORY) {
-                stack.push(child);
-            } else if (name.startsWith('rollout-') && name.endsWith('.jsonl')) {
-                const mt = info.get_modification_date_time();
-                results.push({ path: child.get_path(), mtime: mt ? mt.to_unix() : 0 });
-            }
-        }
-        en.close(null);
-    }
-    results.sort((a, b) => b.mtime - a.mtime);
-    return results;
+async function listCodexRollouts(ctx) {
+    const files = await listFiles(GLib.build_filenamev([ctx.home, '.codex', 'sessions']), {
+        match: name => name.startsWith('rollout-') && name.endsWith('.jsonl'),
+    }, ctx.cancellable);
+    return files.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
 // ---------- fetchers ----------
 
 async function fetchClaude(ctx) {
     try {
-        const [ok, contents] = GLib.file_get_contents(
-            GLib.build_filenamev([ctx.home, '.claude', '.credentials.json']));
-        if (!ok) return { ok: false, err: 'read failed' };
-        const cred = JSON.parse(decode(contents)).claudeAiOauth;
+        const credText = await readText(
+            GLib.build_filenamev([ctx.home, '.claude', '.credentials.json']), ctx.cancellable);
+        const cred = JSON.parse(credText).claudeAiOauth;
         const { status, text } = await httpGetJson(ctx,
             'https://api.anthropic.com/api/oauth/usage', {
                 Authorization: `Bearer ${cred.accessToken}`,
@@ -148,7 +129,7 @@ async function fetchClaudeTokens(ctx) {
 
 async function fetchCodex(ctx) {
     try {
-        return readCodexRateLimits(ctx) || { ok: false, err: 'no session data' };
+        return await readCodexRateLimits(ctx) || { ok: false, err: 'no session data' };
     } catch (_e) {
         return { ok: false, err: 'read failed' };
     }
@@ -158,12 +139,11 @@ async function fetchCodex(ctx) {
 // Shared by fetchCodex and Codex's detect, so a sessions dir holding only
 // rollouts without quota data (e.g. a session that never reached the server)
 // doesn't put a permanent "--" in the panel.
-function readCodexRateLimits(ctx) {
-    const dir = GLib.build_filenamev([ctx.home, '.codex', 'sessions']);
-    for (const f of listCodexRollouts(dir).slice(0, 5)) {
-        const [ok, contents] = GLib.file_get_contents(f.path);
-        if (!ok) continue;
-        const lines = decode(contents).split('\n').filter(l => l.includes('"rate_limits"'));
+async function readCodexRateLimits(ctx) {
+    for (const f of (await listCodexRollouts(ctx)).slice(0, 5)) {
+        const text = await readTextOrNull(f.path, ctx.cancellable);
+        if (text === null) continue;
+        const lines = text.split('\n').filter(l => l.includes('"rate_limits"'));
         if (!lines.length) continue;
         const rl = JSON.parse(lines[lines.length - 1]).payload?.rate_limits;
         if (!rl) continue;
@@ -298,29 +278,30 @@ async function fetchOllama(ctx) {
 
 export const PROVIDERS = [
     { key: 'claude', name: 'CLAUDE', remote: true, fetch: fetchClaude,
-        detect: ctx => exists(GLib.build_filenamev([ctx.home, '.claude', '.credentials.json'])) },
+        detect: ctx => homeHas(ctx, '.claude', '.credentials.json') },
     { key: 'claudeTokens', name: 'TOKENS', remote: false, fetch: fetchClaudeTokens,
-        detect: ctx => exists(GLib.build_filenamev([ctx.home, '.claude', 'projects'])) },
+        detect: ctx => homeHas(ctx, '.claude', 'projects') },
     { key: 'codex', name: 'CODEX ', remote: false, fetch: fetchCodex,
         // Only show Codex once a recent rollout actually logged quota windows:
         // an empty sessions dir, or one with only quota-less sessions, would
         // otherwise sit in the panel as a permanent "--".
-        detect: ctx => { try { return readCodexRateLimits(ctx) !== null; } catch (_e) { return false; } } },
+        detect: async ctx => (await readCodexRateLimits(ctx)) !== null },
     { key: 'cursor', name: 'CURSOR', remote: true, fetch: fetchCursor,
-        detect: ctx => exists(GLib.build_filenamev([ctx.home, '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb'])) },
+        detect: ctx => homeHas(ctx, '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb') },
     { key: 'copilot', name: 'COPILT', remote: true, fetch: fetchCopilot, autoHide: true,
         detect: ctx => !!ctx.config.githubToken && !!ctx.config.githubUser },
     { key: 'devin', name: 'DEVIN ', remote: true, fetch: fetchDevin,
-        detect: ctx => !!ctx.nodeExe && ['Devin', 'Windsurf'].some(app =>
-            exists(GLib.build_filenamev([ctx.home, '.config', app, 'User', 'globalStorage', 'state.vscdb']))) },
+        detect: async ctx => !!ctx.nodeExe && (await Promise.all(['Devin', 'Windsurf'].map(app =>
+            homeHas(ctx, '.config', app, 'User', 'globalStorage', 'state.vscdb')))).some(Boolean) },
     { key: 'ollama', name: 'OLLAMA', remote: true, fetch: fetchOllama, autoHide: true,
         detect: ctx => !!ctx.config.ollamaCookie },
     { key: 'opencode', name: 'OPENCD', remote: false, fetch: fetchOpenCode,
-        detect: ctx => exists(GLib.build_filenamev([ctx.home, '.local', 'share', 'opencode', 'opencode.db'])) },
+        detect: ctx => homeHas(ctx, '.local', 'share', 'opencode', 'opencode.db') },
 ];
 
 // Resolve which providers to show, in registry order (mirrors $enabledProviders).
-export function resolveEnabled(ctx) {
+// Async because some detects (Codex) read files.
+export async function resolveEnabled(ctx) {
     const sections = ctx.config.sections;
     if (Array.isArray(sections)) {
         const wanted = sections.map(s => String(s).toLowerCase());
@@ -328,9 +309,15 @@ export function resolveEnabled(ctx) {
     }
     // "auto": only tools with local data/config; if none, fall back to
     // everything that runs without extra config.
-    let enabled = PROVIDERS.filter(p => {
-        try { return p.detect(ctx); } catch (_e) { return false; }
-    });
+    const detected = await Promise.all(PROVIDERS.map(async p => {
+        try {
+            return await p.detect(ctx);
+        } catch (e) {
+            if (isCancelled(e)) throw e;
+            return false;
+        }
+    }));
+    let enabled = PROVIDERS.filter((_p, i) => detected[i]);
     if (enabled.length === 0) enabled = PROVIDERS.filter(p => !p.autoHide);
     return enabled;
 }

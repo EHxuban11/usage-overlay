@@ -68,7 +68,7 @@ Manage it later with `gnome-extensions disable/enable usage-overlay@iamludok.git
 cd linux/usage-overlay@iamludok.github.io
 gnome-extensions pack . --force -o ~/Downloads \
   --extra-source=providers.js --extra-source=render.js \
-  --extra-source=icons.js --extra-source=tokens.js \
+  --extra-source=icons.js --extra-source=tokens.js --extra-source=files.js \
   --extra-source=sqlite-usage.js --extra-source=config.example.json \
   --extra-source=LICENSE
 ```

@@ -19,6 +19,7 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
 import { resolveEnabled } from './providers.js';
+import { readTextOrNull, isCancelled } from './files.js';
 import { providerMarkup, legendMarkup, panelRows, PANEL_SEPARATOR, escapeMarkup, PROVIDER_COLOR, hexToRgb } from './render.js';
 import * as icons from './icons.js';
 
@@ -30,7 +31,6 @@ const DEFAULTS = {
     copilotIncluded: 200,
 };
 
-const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 const GLYPH_SIZE = 16;
 
@@ -102,29 +102,48 @@ export default class UsageOverlayExtension extends Extension {
         this._tick = -1;
         this._inflight = new Set();
         this._lastGood = {};
-
-        this._cfg = this._loadConfig();
-        // The cache is written asynchronously (_writeCache), which needs its
-        // directory to exist already.
-        GLib.mkdir_with_parents(GLib.path_get_dirname(this._configPath('usage-cache.json')), 0o755);
-        this._session = new Soup.Session();
-        this._session.timeout = 8;
-        this._session.user_agent = 'usage-overlay/1';
         // Cancelled in _stop(), so file reads and helper processes still in
         // flight don't outlive the extension.
         this._cancellable = new Gio.Cancellable();
+
+        // Config, detection and cache all read files, which happens async; the
+        // indicator appears once they're in (a moment after enable()).
+        const gen = this._generation;
+        this._startAsync(gen).catch(e => {
+            if (!isCancelled(e)) console.error('usage-overlay: start failed', e);
+        });
+    }
+
+    async _startAsync(gen) {
+        const cancellable = this._cancellable;
+        const stale = () => this._destroyed || gen !== this._generation;
+
+        const cfg = await this._loadConfig(cancellable);
+        if (stale()) return;
+        this._cfg = cfg;
+        await this._ensureConfigDir(cancellable);
+        if (stale()) return;
+
+        this._session = new Soup.Session();
+        this._session.timeout = 8;
+        this._session.user_agent = 'usage-overlay/1';
         this._ctx = {
             home: GLib.get_home_dir(),
             extDir: this.path,
             nodeExe: GLib.find_program_in_path('node'),
             config: this._cfg,
             session: this._session,
-            cancellable: this._cancellable,
+            cancellable,
         };
-        this._enabled = resolveEnabled(this._ctx);
+        const enabled = await resolveEnabled(this._ctx);
+        if (stale()) return;
+        this._enabled = enabled;
+
+        const cached = await this._loadCache(cancellable);
+        if (stale()) return;
+        Object.assign(this._lastGood, cached);
 
         this._buildIndicator();
-        this._loadCache();
         this._draw();
 
         // Kick an immediate tick, then refresh on the configured interval.
@@ -138,8 +157,10 @@ export default class UsageOverlayExtension extends Extension {
         if (this._refreshId) { GLib.Source.remove(this._refreshId); this._refreshId = 0; }
         if (this._cancellable) { this._cancellable.cancel(); this._cancellable = null; }
         if (this._session) { this._session.abort(); this._session = null; }
+        // The label lives inside the indicator's menu and would go with it,
+        // but destroy it explicitly so nothing is left to chance.
+        if (this._menuLabel) { this._menuLabel.destroy(); this._menuLabel = null; }
         if (this._indicator) { this._indicator.destroy(); this._indicator = null; }
-        this._menuLabel = null;
         this._tokensProvider = null;
         this._enabled = null;
         this._ctx = null;
@@ -266,31 +287,41 @@ export default class UsageOverlayExtension extends Extension {
         return GLib.build_filenamev([GLib.get_user_config_dir(), 'usage-overlay', name]);
     }
 
-    _loadConfig() {
+    async _loadConfig(cancellable) {
         const cfg = { ...DEFAULTS };
-        this._cfgPath = this._configPath('config.json');
-        if (GLib.file_test(this._cfgPath, GLib.FileTest.EXISTS)) {
+        const text = await readTextOrNull(this._configPath('config.json'), cancellable);
+        if (text !== null) {
             try {
-                const [ok, c] = GLib.file_get_contents(this._cfgPath);
-                if (ok) Object.assign(cfg, JSON.parse(decoder.decode(c)));
+                Object.assign(cfg, JSON.parse(text));
             } catch (_e) { /* a bad config must never stop the overlay */ }
         }
         cfg.refreshSeconds = Math.max(15, Number.parseInt(cfg.refreshSeconds, 10) || 60);
         return cfg;
     }
 
-    _loadCache() {
-        const path = this._configPath('usage-cache.json');
-        if (!GLib.file_test(path, GLib.FileTest.EXISTS)) return;
+    // The cache is written asynchronously (_writeCache), which needs its
+    // directory to exist already. ~/.config itself always does.
+    async _ensureConfigDir(cancellable) {
+        const dir = Gio.File.new_for_path(GLib.path_get_dirname(this._configPath('config.json')));
         try {
-            const [ok, c] = GLib.file_get_contents(path);
-            if (!ok) return;
-            const saved = JSON.parse(decoder.decode(c));
-            for (const [k, v] of Object.entries(saved)) {
-                v.stale = true;   // last-known, not live
-                this._lastGood[k] = v;
-            }
-        } catch (_e) { /* ignore a corrupt cache */ }
+            await dir.make_directory_async(GLib.PRIORITY_DEFAULT, cancellable);
+        } catch (e) {
+            if (isCancelled(e)) throw e;
+            // EXISTS is the normal case; anything else just means no cache.
+        }
+    }
+
+    // Last-known results from the previous session, all flagged stale.
+    async _loadCache(cancellable) {
+        const text = await readTextOrNull(this._configPath('usage-cache.json'), cancellable);
+        if (text === null) return {};
+        try {
+            const saved = JSON.parse(text);
+            for (const v of Object.values(saved)) v.stale = true;   // last-known, not live
+            return saved;
+        } catch (_e) {
+            return {};   // ignore a corrupt cache
+        }
     }
 
     // Called on every redraw, but only touches the disk when the data actually

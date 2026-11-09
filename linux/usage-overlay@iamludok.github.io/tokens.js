@@ -11,12 +11,7 @@
 import GLib from 'gi://GLib';
 import Gio from 'gi://Gio';
 
-Gio._promisify(Gio.File.prototype, 'enumerate_children_async');
-Gio._promisify(Gio.FileEnumerator.prototype, 'next_files_async');
-Gio._promisify(Gio.FileEnumerator.prototype, 'close_async');
-Gio._promisify(Gio.File.prototype, 'read_async');
-Gio._promisify(Gio.InputStream.prototype, 'read_bytes_async');
-Gio._promisify(Gio.InputStream.prototype, 'close_async');
+import { listFiles, isCancelled } from './files.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
@@ -24,47 +19,9 @@ const WEEK_MS = 7 * DAY_MS;
 // window, so they're skipped (and forgotten).
 const SCAN_HORIZON_MS = 8 * DAY_MS;
 const CHUNK_BYTES = 1 << 20;
-const ENUM_BATCH = 100;
 const NEWLINE = 10;
 
 const decoder = new TextDecoder();
-
-// Every *.jsonl under dir modified since minMtimeMs, as { path, size }.
-async function listRecentJsonl(dir, minMtimeMs, cancellable) {
-    const out = [];
-    const stack = [Gio.File.new_for_path(dir)];
-    const attrs = 'standard::name,standard::type,standard::size,time::modified';
-    while (stack.length) {
-        const d = stack.pop();
-        let en;
-        try {
-            en = await d.enumerate_children_async(attrs,
-                Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, GLib.PRIORITY_LOW, cancellable);
-        } catch (e) {
-            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) throw e;
-            continue;   // unreadable dir: skip it
-        }
-        try {
-            for (;;) {
-                const infos = await en.next_files_async(ENUM_BATCH, GLib.PRIORITY_LOW, cancellable);
-                if (!infos.length) break;
-                for (const info of infos) {
-                    const name = info.get_name();
-                    if (info.get_file_type() === Gio.FileType.DIRECTORY) {
-                        stack.push(d.get_child(name));
-                    } else if (name.endsWith('.jsonl')) {
-                        const mt = info.get_modification_date_time();
-                        if (mt && mt.to_unix() * 1000 >= minMtimeMs)
-                            out.push({ path: d.get_child(name).get_path(), size: info.get_size() });
-                    }
-                }
-            }
-        } finally {
-            en.close_async(GLib.PRIORITY_LOW, null).catch(() => {});
-        }
-    }
-    return out;
-}
 
 // Append (timestamp ms, tokens) pairs from complete JSONL lines to samples.
 function parseLines(bytes, samples) {
@@ -92,7 +49,10 @@ export class ClaudeTokenCounter {
 
     async count(cancellable = null) {
         const now = Date.now();
-        const files = await listRecentJsonl(this._root, now - SCAN_HORIZON_MS, cancellable);
+        const files = await listFiles(this._root, {
+            match: name => name.endsWith('.jsonl'),
+            minMtimeMs: now - SCAN_HORIZON_MS,
+        }, cancellable);
 
         const seen = new Set();
         for (const f of files) {
@@ -107,7 +67,7 @@ export class ClaudeTokenCounter {
                 try {
                     await this._readAppended(f.path, st, cancellable);
                 } catch (e) {
-                    if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) throw e;
+                    if (isCancelled(e)) throw e;
                     this._files.delete(f.path);   // retry the whole file next time
                 }
             }
