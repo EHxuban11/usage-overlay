@@ -1,0 +1,8 @@
+{
+  "refreshSeconds": 60,
+  "sections": "auto",
+  "githubUser": "",
+  "githubToken": "",
+  "copilotIncluded": 200,
+  "ollamaCookie": ""
+}
