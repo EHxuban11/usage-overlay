@@ -6,13 +6,15 @@ final class OverlayView: NSView {
   var movable = false
   var configError: String?
   var desiredHeight: CGFloat {
-    48 + (configError == nil ? 0 : 24)
-      + (entries.isEmpty
-        ? 42
-        : entries.reduce(0) { total, entry in
-          total + 34 + CGFloat(max(1, entry.1.rows.count + entry.1.text.count)) * 23
-            + (entry.1.error == nil ? 0 : 18)
-        })
+    var height: CGFloat = 48
+    if configError != nil { height += 24 }
+    if entries.isEmpty { height += 42 }
+    for (_, usage) in entries {
+      let rowCount = max(1, usage.rows.count + usage.text.count)
+      height += 34 + CGFloat(rowCount) * 23
+      if usage.error != nil { height += 18 }
+    }
+    return height
   }
   override var isFlipped: Bool { true }
   override func mouseDown(with event: NSEvent) {
@@ -253,14 +255,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     overlay.entries = enabled.map { ($0, cache[$0] ?? Usage(error: "loading")) }
     overlay.setAccessibilityElement(true)
     overlay.setAccessibilityRole(.group)
-    overlay.setAccessibilityLabel(
-      "Usage Overlay. "
-        + overlay.entries.map { name, usage in
-          name.capitalized + ": "
-            + (usage.rows.map {
-              "\($0.label) \(Int($0.percent)) percent used, \(countdown($0.resets))"
-            } + usage.text + (usage.error.map { [$0] } ?? [])).joined(separator: ", ")
-        }.joined(separator: ". "))
+    var descriptions: [String] = []
+    for (name, usage) in overlay.entries {
+      var details: [String] = []
+      for row in usage.rows {
+        let percent = String(format: "%.0f", row.percent)
+        var detail = "\(row.label) \(percent) percent used"
+        let reset = countdown(row.resets)
+        if !reset.isEmpty { detail += ", \(reset)" }
+        details.append(detail)
+      }
+      details.append(contentsOf: usage.text)
+      if let error = usage.error { details.append(error) }
+      descriptions.append(name.capitalized + ": " + details.joined(separator: ", "))
+    }
+    overlay.setAccessibilityLabel("Usage Overlay. " + descriptions.joined(separator: ". "))
     let old = panel.frame
     let height = overlay.desiredHeight
     var point = NSPoint(x: old.minX, y: old.maxY - height)
