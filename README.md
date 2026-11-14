@@ -1,10 +1,15 @@
 # usage-overlay
 
-A tiny, always-on-top, click-through overlay for Windows that shows how much
+A tiny, always-on-top, click-through overlay for Windows and macOS that shows how much
 of your AI coding-agent quota you have used. Bars are green under 60%, amber
 from 60%, red from 85%, with a countdown to each window reset. On fetch
-failures it keeps the last good numbers (shown amber) and retries. Click the
-`?` button for a built-in legend.
+failures it keeps the last good numbers (shown amber) and retries. Open the
+built-in legend with `?` on Windows or the menu-bar menu on macOS.
+
+> **macOS?** A native Swift/AppKit port lives in [`macos/`](macos/README.md).
+> Run `./macos/install.sh` to build, install and launch it. Requires macOS 13+
+> and Xcode Command Line Tools with Swift 5.9+. It includes a menu-bar control,
+> Claude Keychain support, and all five providers below, without Node or Python.
 
 > **Linux (GNOME)?** A GNOME Shell extension port lives in [`linux/`](linux/README.md).
 > Instead of a floating window it lives in the top panel: one pixel glyph and
@@ -24,10 +29,10 @@ failures it keeps the last good numbers (shown amber) and retries. Click the
 | `OPENCD` | OpenCode | Local spend tracked in `opencode.db`, shown as $ spent (Zen has no quota API). |
 
 The overlay only reads credentials and data those tools leave behind; it
-never logs in for you. Node.js is required for the `CURSOR` and `OPENCD`
-sections.
+never logs in for you. On Windows, Node.js is required for the `CURSOR` and
+`OPENCD` sections. The macOS port has no third-party runtime dependencies.
 
-## Run / stop
+## Run / stop (Windows)
 
 ```powershell
 powershell -WindowStyle Hidden -File usage-overlay.ps1

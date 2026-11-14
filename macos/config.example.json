@@ -1,0 +1,11 @@
+{
+  "corner": "top-right",
+  "marginX": 14,
+  "marginY": 14,
+  "refreshSeconds": 60,
+  "sections": "auto",
+  "githubUser": "",
+  "githubToken": "",
+  "copilotIncluded": 200,
+  "claudeKeychainService": "Claude Code-credentials"
+}

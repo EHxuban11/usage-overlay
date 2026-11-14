@@ -21,3 +21,8 @@ opencode.db
 rollout-*.jsonl
 *.db
 *.sqlite
+
+# macOS Swift build output and editor metadata
+macos/.build/
+macos/.swiftpm/
+.DS_Store
