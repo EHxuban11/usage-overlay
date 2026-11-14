@@ -1,0 +1,20 @@
+name: macOS
+permissions:
+  contents: read
+on:
+  push:
+    branches: [main]
+    paths: ['macos/**', '.github/workflows/macos.yml']
+  pull_request:
+    paths: ['macos/**', '.github/workflows/macos.yml']
+jobs:
+  build-and-test:
+    strategy:
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift test --package-path macos
+      - run: bash macos/install.sh --no-launch
+      - run: codesign --verify --strict "$HOME/Applications/Usage Overlay.app"
